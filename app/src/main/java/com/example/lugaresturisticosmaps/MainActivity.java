@@ -41,11 +41,10 @@ import retrofit2.Retrofit;
 import retrofit2.converter.gson.GsonConverterFactory;
 
 public class MainActivity extends AppCompatActivity implements OnMapReadyCallback {
-//variables a usar en el codigo para moldear nuestra aplicacion
+
     private GoogleMap mMap;
     private FusedLocationProviderClient fusedLocationClient;
     private static final int LOCATION_REQUEST_CODE = 100;
- //llamo a los elemntos del diseno
     private Spinner spinnerCategoria, spinnerSubcategoria;
     private TextView txtLatLong;
     private String categoriaSeleccionada, subcategoriaSeleccionada;
@@ -55,7 +54,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);//llamar el diseno
+        setContentView(R.layout.activity_main);
 
         // Configurar Google Maps
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
@@ -75,6 +74,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         slider.addOnChangeListener((slider1, value, fromUser) -> {
             radio = value * 1000; // Convertir a metros
             cargarLugares();
+            actualizarMapaConRadio();
         });
 
         // Configurar los spinners
@@ -94,6 +94,14 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         } else {
             obtenerUbicacion();
         }
+
+        // Mostrar latitud y longitud al tocar un marcador
+        mMap.setOnMarkerClickListener(marker -> {
+            double lat = marker.getPosition().latitude;
+            double lng = marker.getPosition().longitude;
+            txtLatLong.setText("Latitud: " + lat + ", Longitud: " + lng);
+            return false;
+        });
     }
 
     private void obtenerUbicacion() {
@@ -107,7 +115,10 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
                 LatLng userLocation = new LatLng(userLat, userLng);
 
-                // Dibujar un círculo que representa el radio
+                // Limpiar el mapa antes de agregar el círculo
+                mMap.clear();
+
+                // Dibujar el círculo con el radio actualizado
                 mMap.addCircle(new CircleOptions()
                         .center(userLocation)
                         .radius(radio)
@@ -115,8 +126,9 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                         .strokeColor(0xFF0000FF)
                         .fillColor(0x220000FF)); // Color azul transparente
 
-                // Centrar la cámara en la ubicación del usuario
-                mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(userLocation, 13));
+                // Ajustar el zoom de la cámara según el radio
+                float zoom = 15 - (radio / 1000);  // Ajustar zoom: mientras menor el radio, mayor el zoom
+                mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(userLocation, zoom));
 
                 // Cargar lugares cercanos
                 cargarLugares();
@@ -174,7 +186,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     private void configurarSpinners() {
-        // Cargar las categorías y subcategorías desde la API
         Retrofit retrofit = new Retrofit.Builder()
                 .baseUrl("https://turismoquevedo.com/lugar_turistico/")
                 .addConverterFactory(GsonConverterFactory.create())
@@ -228,7 +239,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     }
 
     private void cargarSubcategorias(String categoriaSeleccionada) {
-        // Similar a lo anterior, cargar las subcategorías en función de la categoría seleccionada
         Retrofit retrofit = new Retrofit.Builder()
                 .baseUrl("https://turismoquevedo.com/lugar_turistico/")
                 .addConverterFactory(GsonConverterFactory.create())
@@ -244,7 +254,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                         JSONObject jsonObject = new JSONObject(jsonResponse);
                         JSONArray subcategorias = jsonObject.getJSONArray("data");
 
-                        // Cargar las subcategorías en el spinner
                         List<String> subcategoriaList = new ArrayList<>();
                         for (int i = 0; i < subcategorias.length(); i++) {
                             JSONObject subcategoria = subcategorias.getJSONObject(i);
@@ -266,5 +275,27 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 Log.e("Error", "Error en la solicitud de subcategorías: ", t);
             }
         });
+    }
+
+    private void actualizarMapaConRadio() {
+        LatLng userLocation = new LatLng(userLat, userLng);
+
+        // Limpiar el mapa antes de agregar el círculo
+        mMap.clear();
+
+        // Dibujar el círculo con el radio actualizado
+        mMap.addCircle(new CircleOptions()
+                .center(userLocation)
+                .radius(radio)
+                .strokeWidth(2)
+                .strokeColor(0xFF0000FF)
+                .fillColor(0x220000FF)); // Color azul transparente
+
+        // Ajustar el zoom de la cámara según el radio
+        float zoom = 15 - (radio / 1000);  // Ajustar zoom: mientras menor el radio, mayor el zoom
+        mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(userLocation, zoom));
+
+        // Cargar lugares cercanos
+        cargarLugares();
     }
 }
