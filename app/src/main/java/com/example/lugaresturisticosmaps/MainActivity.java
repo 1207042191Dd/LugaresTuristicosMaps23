@@ -1,6 +1,5 @@
 package com.example.lugaresturisticosmaps;
 
-
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.location.Location;
@@ -10,6 +9,7 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Spinner;
+import android.widget.TextView;
 import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 
 import androidx.annotation.NonNull;
@@ -41,12 +41,13 @@ import retrofit2.Retrofit;
 import retrofit2.converter.gson.GsonConverterFactory;
 
 public class MainActivity extends AppCompatActivity implements OnMapReadyCallback {
-
+//variables a usar en el codigo para moldear nuestra aplicacion
     private GoogleMap mMap;
     private FusedLocationProviderClient fusedLocationClient;
     private static final int LOCATION_REQUEST_CODE = 100;
-
+ //llamo a los elemntos del diseno
     private Spinner spinnerCategoria, spinnerSubcategoria;
+    private TextView txtLatLong;
     private String categoriaSeleccionada, subcategoriaSeleccionada;
     private float radio = 5000; // Radio inicial en metros
     private double userLat, userLng;
@@ -54,7 +55,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
+        setContentView(R.layout.activity_main);//llamar el diseno
 
         // Configurar Google Maps
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
@@ -65,6 +66,9 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
         // Inicializar cliente de ubicación
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
+
+        // Inicializar el TextView para latitud y longitud
+        txtLatLong = findViewById(R.id.txtLatLong);
 
         // Configurar el slider
         Slider slider = findViewById(R.id.sliderRadio);
@@ -98,6 +102,9 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 userLat = location.getLatitude();
                 userLng = location.getLongitude();
 
+                // Mostrar latitud y longitud
+                txtLatLong.setText("Latitud: " + userLat + ", Longitud: " + userLng);
+
                 LatLng userLocation = new LatLng(userLat, userLng);
 
                 // Dibujar un círculo que representa el radio
@@ -119,7 +126,7 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
 
     private void cargarLugares() {
         Retrofit retrofit = new Retrofit.Builder()
-                .baseUrl("https://uealecpeterson.net/turismo/lugar_turistico/")
+                .baseUrl("https://turismoquevedo.com/lugar_turistico/")
                 .addConverterFactory(GsonConverterFactory.create())
                 .build();
 
@@ -129,91 +136,135 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
             public void onResponse(Call<ResponseBody> call, Response<ResponseBody> response) {
                 if (response.isSuccessful()) {
                     try {
-                        JSONObject jsonObject = new JSONObject(response.body().string());
-                        JSONArray data = jsonObject.getJSONArray("data");
-                        mMap.clear(); // Limpiar marcadores anteriores
-                        mMap.addCircle(new CircleOptions()
-                                .center(new LatLng(userLat, userLng))
-                                .radius(radio)
-                                .strokeWidth(2)
-                                .strokeColor(0xFF0000FF)
-                                .fillColor(0x220000FF)); // Redibujar círculo
+                        String jsonResponse = response.body().string();
+                        JSONObject jsonObject = new JSONObject(jsonResponse);
+                        JSONArray lugares = jsonObject.getJSONArray("data");
 
-                        for (int i = 0; i < data.length(); i++) {
-                            JSONObject lugar = data.getJSONObject(i);
-                            double lat = lugar.getDouble("lat");
-                            double lng = lugar.getDouble("lng");
+                        // Limpiar el mapa antes de agregar nuevos lugares
+                        mMap.clear();
+
+                        for (int i = 0; i < lugares.length(); i++) {
+                            JSONObject lugar = lugares.getJSONObject(i);
                             String nombre = lugar.getString("nombre_lugar");
-                            String descripcion = lugar.getString("descripcion");
+                            double lat = lugar.getDouble("latitud");
+                            double lng = lugar.getDouble("longitud");
+                            String direccion = lugar.getString("direccion");
 
-                            // Marcadores personalizados
-                            mMap.addMarker(new MarkerOptions()
-                                    .position(new LatLng(lat, lng))
+                            // Crear el marcador
+                            LatLng latLng = new LatLng(lat, lng);
+                            MarkerOptions markerOptions = new MarkerOptions()
+                                    .position(latLng)
                                     .title(nombre)
-                                    .snippet(descripcion)
-                                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ORANGE))); // Marcador naranja
+                                    .snippet(direccion)
+                                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE));
+
+                            mMap.addMarker(markerOptions);
                         }
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        Log.e("Error", "Error al cargar los lugares: ", e);
                     }
                 }
             }
 
             @Override
             public void onFailure(Call<ResponseBody> call, Throwable t) {
-                t.printStackTrace();
+                Log.e("Error", "Error en la solicitud: ", t);
             }
         });
     }
 
     private void configurarSpinners() {
-        List<String> categorias = new ArrayList<>();
-        categorias.add("Agencia de Viajes");
-        categorias.add("Restaurante");
-        categorias.add("Hotel");
+        // Cargar las categorías y subcategorías desde la API
+        Retrofit retrofit = new Retrofit.Builder()
+                .baseUrl("https://turismoquevedo.com/lugar_turistico/")
+                .addConverterFactory(GsonConverterFactory.create())
+                .build();
 
-        ArrayAdapter<String> adapterCategoria = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item, categorias);
-        adapterCategoria.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        spinnerCategoria.setAdapter(adapterCategoria);
-
-        spinnerCategoria.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+        ApiService apiService = retrofit.create(ApiService.class);
+        apiService.getCategorias().enqueue(new Callback<ResponseBody>() {
             @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                categoriaSeleccionada = categorias.get(position);
-                cargarLugares();
+            public void onResponse(Call<ResponseBody> call, Response<ResponseBody> response) {
+                if (response.isSuccessful()) {
+                    try {
+                        String jsonResponse = response.body().string();
+                        JSONObject jsonObject = new JSONObject(jsonResponse);
+                        JSONArray categorias = jsonObject.getJSONArray("data");
+
+                        // Cargar las categorías en el spinner
+                        List<String> categoriaList = new ArrayList<>();
+                        for (int i = 0; i < categorias.length(); i++) {
+                            JSONObject categoria = categorias.getJSONObject(i);
+                            categoriaList.add(categoria.getString("categoria"));
+                        }
+
+                        ArrayAdapter<String> categoriaAdapter = new ArrayAdapter<>(MainActivity.this,
+                                android.R.layout.simple_spinner_item, categoriaList);
+                        categoriaAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+                        spinnerCategoria.setAdapter(categoriaAdapter);
+
+                        // Configurar el listener para cambios en la categoría
+                        spinnerCategoria.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                            @Override
+                            public void onItemSelected(AdapterView<?> parentView, View selectedItemView, int position, long id) {
+                                categoriaSeleccionada = categoriaList.get(position);
+                                cargarSubcategorias(categoriaSeleccionada);
+                            }
+
+                            @Override
+                            public void onNothingSelected(AdapterView<?> parentView) {
+                            }
+                        });
+                    } catch (Exception e) {
+                        Log.e("Error", "Error al cargar las categorías: ", e);
+                    }
+                }
             }
 
             @Override
-            public void onNothingSelected(AdapterView<?> parent) {}
-        });
-
-        List<String> subcategorias = new ArrayList<>();
-        subcategorias.add("Viajes");
-        subcategorias.add("Paquetes turísticos");
-
-        ArrayAdapter<String> adapterSubcategoria = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item, subcategorias);
-        adapterSubcategoria.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        spinnerSubcategoria.setAdapter(adapterSubcategoria);
-
-        spinnerSubcategoria.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                subcategoriaSeleccionada = subcategorias.get(position);
-                cargarLugares();
+            public void onFailure(Call<ResponseBody> call, Throwable t) {
+                Log.e("Error", "Error en la solicitud de categorías: ", t);
             }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {}
         });
     }
 
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == LOCATION_REQUEST_CODE && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            obtenerUbicacion();
-        }
+    private void cargarSubcategorias(String categoriaSeleccionada) {
+        // Similar a lo anterior, cargar las subcategorías en función de la categoría seleccionada
+        Retrofit retrofit = new Retrofit.Builder()
+                .baseUrl("https://turismoquevedo.com/lugar_turistico/")
+                .addConverterFactory(GsonConverterFactory.create())
+                .build();
+
+        ApiService apiService = retrofit.create(ApiService.class);
+        apiService.getSubcategorias(categoriaSeleccionada).enqueue(new Callback<ResponseBody>() {
+            @Override
+            public void onResponse(Call<ResponseBody> call, Response<ResponseBody> response) {
+                if (response.isSuccessful()) {
+                    try {
+                        String jsonResponse = response.body().string();
+                        JSONObject jsonObject = new JSONObject(jsonResponse);
+                        JSONArray subcategorias = jsonObject.getJSONArray("data");
+
+                        // Cargar las subcategorías en el spinner
+                        List<String> subcategoriaList = new ArrayList<>();
+                        for (int i = 0; i < subcategorias.length(); i++) {
+                            JSONObject subcategoria = subcategorias.getJSONObject(i);
+                            subcategoriaList.add(subcategoria.getString("subcategoria"));
+                        }
+
+                        ArrayAdapter<String> subcategoriaAdapter = new ArrayAdapter<>(MainActivity.this,
+                                android.R.layout.simple_spinner_item, subcategoriaList);
+                        subcategoriaAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+                        spinnerSubcategoria.setAdapter(subcategoriaAdapter);
+                    } catch (Exception e) {
+                        Log.e("Error", "Error al cargar las subcategorías: ", e);
+                    }
+                }
+            }
+
+            @Override
+            public void onFailure(Call<ResponseBody> call, Throwable t) {
+                Log.e("Error", "Error en la solicitud de subcategorías: ", t);
+            }
+        });
     }
 }
