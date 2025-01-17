@@ -49,10 +49,16 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private double userLat, userLng;
     private float radio = 5000;
     private Circle searchCircle;
+    private Slider sliderRadio;
+    private Marker locationMarker;
 
     private List<String> categoriasList = new ArrayList<>();
     private HashMap<String, List<String>> subcategoriasMap = new HashMap<>();
     private List<Marker> currentMarkers = new ArrayList<>();
+
+    private static final float MIN_RADIO = 1000f;
+    private static final float MAX_RADIO = 10000f;
+    private static final float DEFAULT_RADIO = 5000f;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -71,6 +77,23 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         txtLugaresCercanos = findViewById(R.id.txtLugaresCercanos);
         spinnerCategoria = findViewById(R.id.spinnerCategoria);
         spinnerSubcategoria = findViewById(R.id.spinnerSubcategoria);
+        sliderRadio = findViewById(R.id.sliderRadio);
+
+        sliderRadio.setValueFrom(0f);
+        sliderRadio.setValueTo(1f);
+        sliderRadio.setValue(0.5f);
+
+        sliderRadio.addOnChangeListener((slider, value, fromUser) -> {
+            radio = MIN_RADIO + (MAX_RADIO - MIN_RADIO) * value;
+            if (mMap != null && locationMarker != null) {
+                actualizarMapaConRadio(locationMarker.getPosition());
+                String categoriaSeleccionada = spinnerCategoria.getSelectedItem() != null ?
+                        spinnerCategoria.getSelectedItem().toString() : null;
+                String subcategoriaSeleccionada = spinnerSubcategoria.getSelectedItem() != null ?
+                        spinnerSubcategoria.getSelectedItem().toString() : null;
+                filtrarMarcadores(categoriaSeleccionada, subcategoriaSeleccionada);
+            }
+        });
 
         Button btnNormal = findViewById(R.id.btnNormal);
         Button btnSatelite = findViewById(R.id.btnSatelite);
@@ -80,7 +103,6 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         btnNormal.setOnClickListener(v -> mMap.setMapType(GoogleMap.MAP_TYPE_NORMAL));
         btnSatelite.setOnClickListener(v -> mMap.setMapType(GoogleMap.MAP_TYPE_SATELLITE));
         btnHibrido.setOnClickListener(v -> mMap.setMapType(GoogleMap.MAP_TYPE_HYBRID));
-
         btnMostrarTodos.setOnClickListener(v -> mostrarTodosLosLugares());
 
         cargarCategoriasYSubcategorias();
@@ -136,10 +158,16 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 txtLatLong.setText("Latitud: " + userLat + ", Longitud: " + userLng);
 
                 LatLng userLocation = new LatLng(userLat, userLng);
-                mMap.addMarker(new MarkerOptions()
+
+                if (locationMarker != null) {
+                    locationMarker.remove();
+                }
+
+                locationMarker = mMap.addMarker(new MarkerOptions()
                         .position(userLocation)
-                        .title("Tu ubicación")
+                        .title("Mi ubicación")
                         .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)));
+                locationMarker.showInfoWindow();
 
                 actualizarMapaConRadio(userLocation);
             }
@@ -158,7 +186,8 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 .strokeColor(0xFF0000FF)
                 .fillColor(0x220000FF));
 
-        mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(userLocation, calcularZoom(radio)));
+        float zoom = calcularZoom(radio);
+        mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(userLocation, zoom));
     }
 
     private float calcularZoom(float radio) {
