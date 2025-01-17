@@ -8,31 +8,30 @@ import android.util.Log;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.Button;
 import android.widget.Spinner;
 import android.widget.TextView;
-import com.google.android.gms.maps.model.BitmapDescriptorFactory;
-
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
-
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
+import com.google.android.gms.maps.model.BitmapDescriptorFactory;
+import com.google.android.gms.maps.model.Circle;
 import com.google.android.gms.maps.model.CircleOptions;
 import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
 import com.google.android.material.slider.Slider;
-
 import org.json.JSONArray;
 import org.json.JSONObject;
-
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
-
 import okhttp3.ResponseBody;
 import retrofit2.Call;
 import retrofit2.Callback;
@@ -46,60 +45,84 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private FusedLocationProviderClient fusedLocationClient;
     private static final int LOCATION_REQUEST_CODE = 100;
     private Spinner spinnerCategoria, spinnerSubcategoria;
-    private TextView txtLatLong;
-    private String categoriaSeleccionada, subcategoriaSeleccionada;
-    private float radio = 5000; // Radio inicial en metros
+    private TextView txtLatLong, txtLugaresCercanos;
     private double userLat, userLng;
+    private float radio = 5000;
+    private Circle searchCircle;
+
+    private List<String> categoriasList = new ArrayList<>();
+    private HashMap<String, List<String>> subcategoriasMap = new HashMap<>();
+    private List<Marker> currentMarkers = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Configurar Google Maps
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
         if (mapFragment != null) {
             mapFragment.getMapAsync(this);
         }
 
-        // Inicializar cliente de ubicación
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
 
-        // Inicializar el TextView para latitud y longitud
         txtLatLong = findViewById(R.id.txtLatLong);
-
-        // Configurar el slider
-        Slider slider = findViewById(R.id.sliderRadio);
-        slider.addOnChangeListener((slider1, value, fromUser) -> {
-            radio = value * 1000; // Convertir a metros
-            cargarLugares();
-            actualizarMapaConRadio();
-        });
-
-        // Configurar los spinners
+        txtLugaresCercanos = findViewById(R.id.txtLugaresCercanos);
         spinnerCategoria = findViewById(R.id.spinnerCategoria);
         spinnerSubcategoria = findViewById(R.id.spinnerSubcategoria);
 
-        configurarSpinners();
+        Button btnNormal = findViewById(R.id.btnNormal);
+        Button btnSatelite = findViewById(R.id.btnSatelite);
+        Button btnHibrido = findViewById(R.id.btnHibrido);
+        Button btnMostrarTodos = findViewById(R.id.btnMostrarTodos);
+
+        btnNormal.setOnClickListener(v -> mMap.setMapType(GoogleMap.MAP_TYPE_NORMAL));
+        btnSatelite.setOnClickListener(v -> mMap.setMapType(GoogleMap.MAP_TYPE_SATELLITE));
+        btnHibrido.setOnClickListener(v -> mMap.setMapType(GoogleMap.MAP_TYPE_HYBRID));
+
+        btnMostrarTodos.setOnClickListener(v -> mostrarTodosLosLugares());
+
+        cargarCategoriasYSubcategorias();
+
+        spinnerCategoria.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                String categoriaSeleccionada = categoriasList.get(position);
+                actualizarSubcategorias(categoriaSeleccionada);
+                filtrarMarcadores(categoriaSeleccionada, null);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+
+        spinnerSubcategoria.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                String categoriaSeleccionada = spinnerCategoria.getSelectedItem().toString();
+                String subcategoriaSeleccionada = spinnerSubcategoria.getSelectedItem().toString();
+                filtrarMarcadores(categoriaSeleccionada, subcategoriaSeleccionada);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
     }
 
     @Override
     public void onMapReady(@NonNull GoogleMap googleMap) {
         mMap = googleMap;
 
-        // Solicitar permisos de ubicación
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, LOCATION_REQUEST_CODE);
         } else {
             obtenerUbicacion();
         }
 
-        // Mostrar latitud y longitud al tocar un marcador
         mMap.setOnMarkerClickListener(marker -> {
-            double lat = marker.getPosition().latitude;
-            double lng = marker.getPosition().longitude;
-            txtLatLong.setText("Latitud: " + lat + ", Longitud: " + lng);
+            LatLng position = marker.getPosition();
+            txtLatLong.setText("Latitud: " + position.latitude + ", Longitud: " + position.longitude);
             return false;
         });
     }
@@ -110,33 +133,39 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 userLat = location.getLatitude();
                 userLng = location.getLongitude();
 
-                // Mostrar latitud y longitud
                 txtLatLong.setText("Latitud: " + userLat + ", Longitud: " + userLng);
 
                 LatLng userLocation = new LatLng(userLat, userLng);
+                mMap.addMarker(new MarkerOptions()
+                        .position(userLocation)
+                        .title("Tu ubicación")
+                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)));
 
-                // Limpiar el mapa antes de agregar el círculo
-                mMap.clear();
-
-                // Dibujar el círculo con el radio actualizado
-                mMap.addCircle(new CircleOptions()
-                        .center(userLocation)
-                        .radius(radio)
-                        .strokeWidth(2)
-                        .strokeColor(0xFF0000FF)
-                        .fillColor(0x220000FF)); // Color azul transparente
-
-                // Ajustar el zoom de la cámara según el radio
-                float zoom = 15 - (radio / 1000);  // Ajustar zoom: mientras menor el radio, mayor el zoom
-                mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(userLocation, zoom));
-
-                // Cargar lugares cercanos
-                cargarLugares();
+                actualizarMapaConRadio(userLocation);
             }
         });
     }
 
-    private void cargarLugares() {
+    private void actualizarMapaConRadio(LatLng userLocation) {
+        if (searchCircle != null) {
+            searchCircle.remove();
+        }
+
+        searchCircle = mMap.addCircle(new CircleOptions()
+                .center(userLocation)
+                .radius(radio)
+                .strokeWidth(2)
+                .strokeColor(0xFF0000FF)
+                .fillColor(0x220000FF));
+
+        mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(userLocation, calcularZoom(radio)));
+    }
+
+    private float calcularZoom(float radio) {
+        return (float) (16 - Math.log(radio / 500) / Math.log(2));
+    }
+
+    private void cargarCategoriasYSubcategorias() {
         Retrofit retrofit = new Retrofit.Builder()
                 .baseUrl("https://turismoquevedo.com/lugar_turistico/")
                 .addConverterFactory(GsonConverterFactory.create())
@@ -152,28 +181,27 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                         JSONObject jsonObject = new JSONObject(jsonResponse);
                         JSONArray lugares = jsonObject.getJSONArray("data");
 
-                        // Limpiar el mapa antes de agregar nuevos lugares
-                        mMap.clear();
-
                         for (int i = 0; i < lugares.length(); i++) {
                             JSONObject lugar = lugares.getJSONObject(i);
-                            String nombre = lugar.getString("nombre_lugar");
-                            double lat = lugar.getDouble("latitud");
-                            double lng = lugar.getDouble("longitud");
-                            String direccion = lugar.getString("direccion");
+                            String categoria = lugar.getString("categoria");
+                            String subcategoria = lugar.getString("subcategoria");
 
-                            // Crear el marcador
-                            LatLng latLng = new LatLng(lat, lng);
-                            MarkerOptions markerOptions = new MarkerOptions()
-                                    .position(latLng)
-                                    .title(nombre)
-                                    .snippet(direccion)
-                                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE));
+                            if (!categoriasList.contains(categoria)) {
+                                categoriasList.add(categoria);
+                                subcategoriasMap.put(categoria, new ArrayList<>());
+                            }
 
-                            mMap.addMarker(markerOptions);
+                            if (!subcategoriasMap.get(categoria).contains(subcategoria)) {
+                                subcategoriasMap.get(categoria).add(subcategoria);
+                            }
                         }
+
+                        ArrayAdapter<String> categoriaAdapter = new ArrayAdapter<>(MainActivity.this,
+                                android.R.layout.simple_spinner_item, categoriasList);
+                        categoriaAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+                        spinnerCategoria.setAdapter(categoriaAdapter);
                     } catch (Exception e) {
-                        Log.e("Error", "Error al cargar los lugares: ", e);
+                        Log.e("Error", "Error al cargar categorías: ", e);
                     }
                 }
             }
@@ -185,117 +213,118 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
         });
     }
 
-    private void configurarSpinners() {
+    private void actualizarSubcategorias(String categoria) {
+        List<String> subcategorias = subcategoriasMap.get(categoria);
+        ArrayAdapter<String> subcategoriaAdapter = new ArrayAdapter<>(MainActivity.this,
+                android.R.layout.simple_spinner_item, subcategorias);
+        subcategoriaAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinnerSubcategoria.setAdapter(subcategoriaAdapter);
+    }
+
+    private void filtrarMarcadores(String categoria, String subcategoria) {
+        for (Marker marker : currentMarkers) {
+            marker.remove();
+        }
+        currentMarkers.clear();
+
         Retrofit retrofit = new Retrofit.Builder()
                 .baseUrl("https://turismoquevedo.com/lugar_turistico/")
                 .addConverterFactory(GsonConverterFactory.create())
                 .build();
 
         ApiService apiService = retrofit.create(ApiService.class);
-        apiService.getCategorias().enqueue(new Callback<ResponseBody>() {
+        apiService.getLugares(userLat, userLng, radio).enqueue(new Callback<ResponseBody>() {
             @Override
             public void onResponse(Call<ResponseBody> call, Response<ResponseBody> response) {
                 if (response.isSuccessful()) {
                     try {
                         String jsonResponse = response.body().string();
                         JSONObject jsonObject = new JSONObject(jsonResponse);
-                        JSONArray categorias = jsonObject.getJSONArray("data");
+                        JSONArray lugares = jsonObject.getJSONArray("data");
 
-                        // Cargar las categorías en el spinner
-                        List<String> categoriaList = new ArrayList<>();
-                        for (int i = 0; i < categorias.length(); i++) {
-                            JSONObject categoria = categorias.getJSONObject(i);
-                            categoriaList.add(categoria.getString("categoria"));
+                        int contador = 0;
+
+                        for (int i = 0; i < lugares.length(); i++) {
+                            JSONObject lugar = lugares.getJSONObject(i);
+                            String lugarCategoria = lugar.getString("categoria");
+                            String lugarSubcategoria = lugar.getString("subcategoria");
+                            String nombre = lugar.getString("nombre_lugar");
+                            double lat = lugar.getDouble("latitud");
+                            double lng = lugar.getDouble("longitud");
+
+                            if (lugarCategoria.equals(categoria) && (subcategoria == null || lugarSubcategoria.equals(subcategoria))) {
+                                LatLng position = new LatLng(lat, lng);
+                                Marker marker = mMap.addMarker(new MarkerOptions()
+                                        .position(position)
+                                        .title(nombre)
+                                        .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE)));
+                                currentMarkers.add(marker);
+                                contador++;
+                            }
                         }
 
-                        ArrayAdapter<String> categoriaAdapter = new ArrayAdapter<>(MainActivity.this,
-                                android.R.layout.simple_spinner_item, categoriaList);
-                        categoriaAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-                        spinnerCategoria.setAdapter(categoriaAdapter);
+                        txtLugaresCercanos.setText("Lugares cercanos: " + contador);
 
-                        // Configurar el listener para cambios en la categoría
-                        spinnerCategoria.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-                            @Override
-                            public void onItemSelected(AdapterView<?> parentView, View selectedItemView, int position, long id) {
-                                categoriaSeleccionada = categoriaList.get(position);
-                                cargarSubcategorias(categoriaSeleccionada);
-                            }
-
-                            @Override
-                            public void onNothingSelected(AdapterView<?> parentView) {
-                            }
-                        });
                     } catch (Exception e) {
-                        Log.e("Error", "Error al cargar las categorías: ", e);
+                        Log.e("Error", "Error al filtrar marcadores: ", e);
                     }
                 }
             }
 
             @Override
             public void onFailure(Call<ResponseBody> call, Throwable t) {
-                Log.e("Error", "Error en la solicitud de categorías: ", t);
+                Log.e("Error", "Error en la solicitud: ", t);
             }
         });
     }
 
-    private void cargarSubcategorias(String categoriaSeleccionada) {
+    private void mostrarTodosLosLugares() {
+        for (Marker marker : currentMarkers) {
+            marker.remove();
+        }
+        currentMarkers.clear();
+
         Retrofit retrofit = new Retrofit.Builder()
                 .baseUrl("https://turismoquevedo.com/lugar_turistico/")
                 .addConverterFactory(GsonConverterFactory.create())
                 .build();
 
         ApiService apiService = retrofit.create(ApiService.class);
-        apiService.getSubcategorias(categoriaSeleccionada).enqueue(new Callback<ResponseBody>() {
+        apiService.getLugares(userLat, userLng, radio).enqueue(new Callback<ResponseBody>() {
             @Override
             public void onResponse(Call<ResponseBody> call, Response<ResponseBody> response) {
                 if (response.isSuccessful()) {
                     try {
                         String jsonResponse = response.body().string();
                         JSONObject jsonObject = new JSONObject(jsonResponse);
-                        JSONArray subcategorias = jsonObject.getJSONArray("data");
+                        JSONArray lugares = jsonObject.getJSONArray("data");
 
-                        List<String> subcategoriaList = new ArrayList<>();
-                        for (int i = 0; i < subcategorias.length(); i++) {
-                            JSONObject subcategoria = subcategorias.getJSONObject(i);
-                            subcategoriaList.add(subcategoria.getString("subcategoria"));
+                        for (int i = 0; i < lugares.length(); i++) {
+                            JSONObject lugar = lugares.getJSONObject(i);
+                            String nombre = lugar.getString("nombre_lugar");
+                            double lat = lugar.getDouble("latitud");
+                            double lng = lugar.getDouble("longitud");
+
+                            LatLng position = new LatLng(lat, lng);
+                            Marker marker = mMap.addMarker(new MarkerOptions()
+                                    .position(position)
+                                    .title(nombre)
+                                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_BLUE)));
+                            currentMarkers.add(marker);
                         }
 
-                        ArrayAdapter<String> subcategoriaAdapter = new ArrayAdapter<>(MainActivity.this,
-                                android.R.layout.simple_spinner_item, subcategoriaList);
-                        subcategoriaAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-                        spinnerSubcategoria.setAdapter(subcategoriaAdapter);
+                        txtLugaresCercanos.setText("Mostrando todos los lugares turísticos");
+
                     } catch (Exception e) {
-                        Log.e("Error", "Error al cargar las subcategorías: ", e);
+                        Log.e("Error", "Error al mostrar todos los lugares: ", e);
                     }
                 }
             }
 
             @Override
             public void onFailure(Call<ResponseBody> call, Throwable t) {
-                Log.e("Error", "Error en la solicitud de subcategorías: ", t);
+                Log.e("Error", "Error en la solicitud: ", t);
             }
         });
-    }
-
-    private void actualizarMapaConRadio() {
-        LatLng userLocation = new LatLng(userLat, userLng);
-
-        // Limpiar el mapa antes de agregar el círculo
-        mMap.clear();
-
-        // Dibujar el círculo con el radio actualizado
-        mMap.addCircle(new CircleOptions()
-                .center(userLocation)
-                .radius(radio)
-                .strokeWidth(2)
-                .strokeColor(0xFF0000FF)
-                .fillColor(0x220000FF)); // Color azul transparente
-
-        // Ajustar el zoom de la cámara según el radio
-        float zoom = 15 - (radio / 1000);  // Ajustar zoom: mientras menor el radio, mayor el zoom
-        mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(userLocation, zoom));
-
-        // Cargar lugares cercanos
-        cargarLugares();
     }
 }
