@@ -58,7 +58,7 @@ Aplicación móvil Android que integra Google Maps con una API de Lugares Turís
 
 ## 👥 Autores
 
-- Nombre del Autor - [GitHub](https://github.com/tu-usuario)
+- EQUIPO DINAMITA - [GitHub](https://github.com/1207042191Dd)
 
 
 
